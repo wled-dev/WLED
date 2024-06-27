@@ -723,7 +723,6 @@ class WS2812FX {  // 96 bytes
       _isOffRefreshRequired(false),
       _hasWhiteChannel(false),
       _triggered(false),
-      _modeCount(MODE_COUNT),
       _callback(nullptr),
       customMappingTable(nullptr),
       customMappingSize(0),
@@ -740,10 +739,9 @@ class WS2812FX {  // 96 bytes
       _qOffset(0)
     {
       WS2812FX::instance = this;
-      _mode.reserve(_modeCount);     // allocate memory to prevent initial fragmentation (does not increase size())
-      _modeData.reserve(_modeCount); // allocate memory to prevent initial fragmentation (does not increase size())
-      if (_mode.capacity() <= 1 || _modeData.capacity() <= 1) _modeCount = 1; // memory allocation failed only show Solid
-      setupEffectData();
+      _mode.reserve(MODE_COUNT);     // allocate memory to prevent initial fragmentation (does not increase size())
+      _modeData.reserve(MODE_COUNT); // allocate memory to prevent initial fragmentation (does not increase size())
+      setupEffectData(std::max(size_t{1}, std::min(_mode.capacity(), _modeData.capacity())));
     }
 
     ~WS2812FX() {
@@ -780,7 +778,7 @@ class WS2812FX {  // 96 bytes
       show(void),                                 // initiates LED output
       setTargetFps(uint8_t fps),
       addEffect(uint8_t id, mode_ptr mode_fn, const char *mode_name), // add effect to the list; defined in FX.cpp
-      setupEffectData(void);                      // add default effects to the list; defined in FX.cpp
+      setupEffectData(size_t mode_count);         // add default effects to the list; defined in FX.cpp
 
     inline void restartRuntime()          { for (Segment &seg : _segments) seg.markForReset(); }
     inline void setTransitionMode(bool t) { for (Segment &seg : _segments) seg.startTransition(t ? _transitionDur : 0); }
@@ -825,7 +823,7 @@ class WS2812FX {  // 96 bytes
     inline uint8_t getMainSegmentId(void) { return _mainSegment; }      // returns main segment index
     inline uint8_t getPaletteCount()      { return 13 + GRADIENT_PALETTE_COUNT + customPalettes.size(); }
     inline uint8_t getTargetFps()         { return _targetFps; }        // returns rough FPS value for las 2s interval
-    inline uint8_t getModeCount()         { return _modeCount; }        // returns number of registered modes/effects
+    inline size_t  getModeCount()         { return _mode.size(); }      // returns number of registered modes/effects
 
     uint16_t
       getLengthPhysical(void),
@@ -847,7 +845,7 @@ class WS2812FX {  // 96 bytes
     inline uint32_t segColor(uint8_t i) { return _colors_t[i]; }        // returns currently valid color (for slot i) AKA SEGCOLOR(); may be blended between two colors while in transition
 
     const char *
-      getModeData(uint8_t id = 0) { return (id && id<_modeCount) ? _modeData[id] : PSTR("Solid"); }
+      getModeData(uint8_t id = 0) { return (id && id<getModeCount()) ? _modeData[id] : PSTR("Solid"); }
 
     const char **
       getModeDataSrc(void) { return &(_modeData[0]); } // vectors use arrays for underlying data
@@ -932,7 +930,6 @@ class WS2812FX {  // 96 bytes
       bool _triggered            : 1;
     };
 
-    uint8_t                  _modeCount;
     std::vector<mode_ptr>    _mode;     // SRAM footprint: 4 bytes per element
     std::vector<const char*> _modeData; // mode (effect) name and its slider control data array
 

@@ -7898,16 +7898,19 @@ void WS2812FX::addEffect(uint8_t id, mode_ptr mode_fn, const char *mode_name) {
   } else {
     _mode.push_back(mode_fn);
     _modeData.push_back(mode_name);
-    if (_modeCount < _mode.size()) _modeCount++;
+    // if there was only eneough memory for one of the pushes, revert the push:
+    size_t modeCount = std::min(_mode.size(), _modeData.size());
+    _mode.resize(modeCount);
+    _modeData.resize(modeCount);
   }
 }
 
-void WS2812FX::setupEffectData() {
+void WS2812FX::setupEffectData(size_t modeCount) {
   // Solid must be first! (assuming vector is empty upon call to setup)
   _mode.push_back(&mode_static);
   _modeData.push_back(_data_FX_MODE_STATIC);
   // fill reserved word in case there will be any gaps in the array
-  for (size_t i=1; i<_modeCount; i++) {
+  for (size_t i=1; i<modeCount; i++) {
     _mode.push_back(&mode_static);
     _modeData.push_back(_data_RESERVED);
   }
