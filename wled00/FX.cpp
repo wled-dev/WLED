@@ -823,11 +823,10 @@ static const char _data_FX_MODE_ANDROID[] PROGMEM = "Android@!,Width;!,!;!;;m12=
  * color1 = background color
  * color2 and color3 = colors of two adjacent leds
  */
-static uint16_t chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do_palette) {
+static uint16_t chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do_palette, bool chase_random) {
   uint16_t counter = strip.now * ((SEGMENT.speed >> 2) + 1);
   uint16_t a = (counter * SEGLEN) >> 16;
 
-  bool chase_random = (SEGMENT.mode == FX_MODE_CHASE_RANDOM);
   if (chase_random) {
     if (a < SEGENV.step) //we hit the start again, choose new color for Chase random
     {
@@ -894,7 +893,7 @@ static uint16_t chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do
  * Bicolor chase, more primary color.
  */
 uint16_t mode_chase_color(void) {
-  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), true);
+  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), true, false);
 }
 static const char _data_FX_MODE_CHASE_COLOR[] PROGMEM = "Chase@!,Width;!,!,!;!";
 
@@ -903,7 +902,7 @@ static const char _data_FX_MODE_CHASE_COLOR[] PROGMEM = "Chase@!,Width;!,!,!;!";
  * Primary running followed by random color.
  */
 uint16_t mode_chase_random(void) {
-  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), false);
+  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), false, true);
 }
 static const char _data_FX_MODE_CHASE_RANDOM[] PROGMEM = "Chase Random@!,Width;!,,!;!";
 
@@ -917,7 +916,7 @@ uint16_t mode_chase_rainbow(void) {
   unsigned color_index = SEGENV.call & 0xFF;
   uint32_t color = SEGMENT.color_wheel(((SEGENV.step * color_sep) + color_index) & 0xFF);
 
-  return chase(color, SEGCOLOR(0), SEGCOLOR(1), false);
+  return chase(color, SEGCOLOR(0), SEGCOLOR(1), false, false);
 }
 static const char _data_FX_MODE_CHASE_RAINBOW[] PROGMEM = "Chase Rainbow@!,Width;!,!;!";
 
@@ -931,7 +930,7 @@ uint16_t mode_chase_rainbow_white(void) {
   uint32_t color2 = SEGMENT.color_wheel(((n * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
   uint32_t color3 = SEGMENT.color_wheel(((m * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
 
-  return chase(SEGCOLOR(0), color2, color3, false);
+  return chase(SEGCOLOR(0), color2, color3, false, false);
 }
 static const char _data_FX_MODE_CHASE_RAINBOW_WHITE[] PROGMEM = "Rainbow Runner@!,Size;Bg;!";
 
