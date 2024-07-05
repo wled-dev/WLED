@@ -687,12 +687,6 @@ typedef struct Segment {
 class WS2812FX {  // 96 bytes
   typedef uint16_t (*mode_ptr)(void); // pointer to mode function
   typedef void (*show_callback)(void); // pre show callback
-  typedef struct ModeData {
-    uint8_t     _id;   // mode (effect) id
-    mode_ptr    _fcn;  // mode (effect) function
-    const char *_data; // mode (effect) name and its UI control data
-    ModeData(uint8_t id, uint16_t (*fcn)(void), const char *data) : _id(id), _fcn(fcn), _data(data) {}
-  } mode_data_t;
 
   static WS2812FX* instance;
 
