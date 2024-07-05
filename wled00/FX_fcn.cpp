@@ -271,6 +271,7 @@ CRGBPalette16 IRAM_ATTR &Segment::loadPalette(CRGBPalette16 &targetPalette, uint
       }
       break;
   }
+  // DEBUG_PRINTLN(F("loadPalette 99"));
   return targetPalette;
 }
 
@@ -328,14 +329,14 @@ void Segment::stopTransition() {
 }
 
 void Segment::handleTransition() {
-  unsigned _progress = progress();
+  uint16_t _progress = progress();
   if (_progress == 0xFFFFU) stopTransition();
 }
 
 // transition progression between 0-65535
 uint16_t IRAM_ATTR Segment::progress() {
   if (isInTransition()) {
-    unsigned diff = millis() - _t->_start;
+    unsigned diff = strip.now - _t->_start;
     if (_t->_dur > 0 && diff < _t->_dur) return diff * 0xFFFFU / _t->_dur;
   }
   return 0xFFFFU;
