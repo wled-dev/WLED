@@ -1,7 +1,7 @@
 //page js
 var loc = false, locip, locproto = "http:";
 var isOn = false, nlA = false, isLv = false, isInfo = false, isNodes = false, syncSend = false/*, syncTglRecv = true*/;
-var hasWhite = false, hasRGB = false, hasCCT = false;
+var hasWhite = false, hasRGB = false, hasCCT = false, has2D = false;
 var nlDur = 60, nlTar = 0;
 var nlMode = false;
 var segLmax = 0; // size (in pixels) of largest selected segment
@@ -588,7 +588,7 @@ function loadFXData(callback = null)
 		fxdata = [];
 		if (!retry) {
 			retry = true;
-			setTimeout(loadFXData, 500); // retry
+			setTimeout(()=>{loadFXData(loadFX);}, 500); // retry
 		}
 		showToast(e, true);
 	})
@@ -677,8 +677,10 @@ function parseInfo(i) {
 	isM = mw>0 && mh>0;
 	if (!isM) {
 		gId("filter2D").classList.add('hide');
+		gId('bs').querySelectorAll('option[data-type="2D"]').forEach((o,i)=>{o.style.display='none';});
 	} else {
 		gId("filter2D").classList.remove('hide');
+		gId('bs').querySelectorAll('option[data-type="2D"]').forEach((o,i)=>{o.style.display='';});
 	}
 //	if (i.noaudio) {
 //		gId("filterVol").classList.add("hide");
@@ -1339,7 +1341,7 @@ function updateSelectedFx()
 				if (ds.id>0) {
 					if (segLmax==0) fx.classList.add('hide'); // none of the segments selected (hide all effects)
 					else {
-						if ((segLmax==1 && (!opts[3] || opts[3].indexOf("0")<0)) || (!isM && opts[3] && ((opts[3].indexOf("2")>=0 && opts[3].indexOf("1")<0)))) fx.classList.add('hide');
+						if ((segLmax==1 && (!opts[3] || opts[3].indexOf("0")<0)) || (!has2D && opts[3] && ((opts[3].indexOf("2")>=0 && opts[3].indexOf("1")<0)))) fx.classList.add('hide');
 						else fx.classList.remove('hide');
 					}
 				}
@@ -1437,11 +1439,14 @@ function readState(s,command=false)
 
 	tr = s.transition;
 	gId('tt').value = tr/10;
+	gId('bs').value = s.bs || 0;
+	if (tr===0) gId('bsp').classList.add('hide')
+	else gId('bsp').classList.remove('hide')
 
 	populateSegments(s);
 	var selc=0;
 	var sellvl=0; // 0: selc is invalid, 1: selc is mainseg, 2: selc is first selected
-	hasRGB = hasWhite = hasCCT = false;
+	hasRGB = hasWhite = hasCCT = has2D = false;
 	segLmax = 0;
 	for (let i = 0; i < (s.seg||[]).length; i++)
 	{
@@ -1452,20 +1457,23 @@ function readState(s,command=false)
 		if (s.seg[i].sel) {
 			if (sellvl < 2) selc = i; // get first selected segment
 			sellvl = 2;
-			var lc = lastinfo.leds.seglc[i];
+			let w  = (s.seg[i].stop - s.seg[i].start);
+			let h  = s.seg[i].stopY ? (s.seg[i].stopY - s.seg[i].startY) : 1;
+			let lc = lastinfo.leds.seglc[i];
 			hasRGB   |= !!(lc & 0x01);
 			hasWhite |= !!(lc & 0x02);
 			hasCCT   |= !!(lc & 0x04);
-			let sLen = (s.seg[i].stop - s.seg[i].start)*(s.seg[i].stopY?(s.seg[i].stopY - s.seg[i].startY):1);
-			segLmax = segLmax < sLen ? sLen : segLmax;
+			has2D    |= w > 1 && h > 1;
+			if (w*h > segLmax) segLmax = w*h;
 		}
 	}
 	var i=s.seg[selc];
 	if (sellvl == 1) {
-		var lc = lastinfo.leds.seglc[selc];
+		let lc = lastinfo.leds.seglc[selc];
 		hasRGB   = !!(lc & 0x01);
 		hasWhite = !!(lc & 0x02);
 		hasCCT   = !!(lc & 0x04);
+		has2D    = (i.stop - i.start) > 1 && (i.stopY ? (i.stopY - i.startY) : 1) > 1;
 	}
 	if (!i) {
 		showToast('No Segments!', true);
@@ -1695,6 +1703,7 @@ function requestJson(command=null)
 			var tn = parseInt(t.value*10);
 			if (tn != tr) command.transition = tn;
 		}
+		//command.bs = parseInt(gId('bs').value);
 		req = JSON.stringify(command);
 		if (req.length > 1340) useWs = false; // do not send very long requests over websocket
 		if (req.length >  500 && lastinfo && lastinfo.arch == "esp8266") useWs = false; // esp8266 can only handle 500 bytes
@@ -1707,9 +1716,7 @@ function requestJson(command=null)
 
 	fetch(getURL('/json/si'), {
 		method: type,
-		headers: {
-			"Content-type": "application/json; charset=UTF-8"
-		},
+		headers: {"Content-Type": "application/json; charset=UTF-8"},
 		body: req
 	})
 	.then(res => {
@@ -2692,7 +2699,9 @@ function setBalance(b)
 function rmtTgl(ip,i) {
 	event.preventDefault();
 	event.stopPropagation();
-	fetch(`http://${ip}/win&T=2`, {method: 'get'})
+	fetch(`http://${ip}/win&T=2`, {
+		method: 'get'
+	})
 	.then((r)=>{
 		return r.text();
 	})
@@ -2784,21 +2793,23 @@ function loadPalettesData(callback = null)
 function getPalettesData(page, callback)
 {
 	fetch(getURL(`/json/palx?page=${page}`), {
-		method: 'get',
-		headers: {
-			"Content-type": "application/json; charset=UTF-8"
-		}
+		method: 'get'
 	})
 	.then(res => {
 		if (!res.ok) showErrorToast();
 		return res.json();
 	})
 	.then(json => {
+		retry = false;
 		palettesData = Object.assign({}, palettesData, json.p);
-		if (page < json.m) setTimeout(()=>{ getPalettesData(page + 1, callback); }, 50);
+		if (page < json.m) setTimeout(()=>{ getPalettesData(page + 1, callback); }, 75);
 		else callback();
 	})
 	.catch((error)=>{
+		if (!retry) {
+			retry = true;
+			setTimeout(()=>{getPalettesData(page,callback);}, 500); // retry
+		}
 		showToast(error, true);
 	});
 }
@@ -2822,8 +2833,13 @@ function search(field, listId = null) {
 
 	// restore default preset sorting if no search term is entered
 	if (!search) {
-		if (listId === 'pcont')   { populatePresets(); return; }
-		if (listId === 'pallist') { populatePalettes(); return; }
+		if (listId === 'pcont') { populatePresets(); return; }
+		if (listId === 'pallist') {
+			let id = parseInt(d.querySelector('#pallist input[name="palette"]:checked').value); // preserve selected palette
+			populatePalettes();
+			updateSelectedPalette(id);
+			return;
+		}
 	}
 
 	// clear filter if searching in fxlist
@@ -2835,12 +2851,17 @@ function search(field, listId = null) {
 	if (gId("filters").querySelectorAll("input[type=checkbox]:checked").length) return;
 
 	// filter list items but leave (Default & Solid) always visible
-	gId(listId).querySelectorAll('.lstI').forEach((listItem,i)=>{
-		if (listId!=='pcont' && i===0) return;
+	const listItems = gId(listId).querySelectorAll('.lstI');
+	listItems.forEach((listItem, i) => {
+		if (listId !== 'pcont' && i === 0) return;
 		const listItemName = listItem.querySelector('.lstIname').innerText.toUpperCase();
 		const searchIndex = listItemName.indexOf(field.value.toUpperCase());
-		listItem.style.display = (searchIndex < 0) ? 'none' : '';
-		listItem.dataset.searchIndex = searchIndex;
+		if (searchIndex < 0) {
+			listItem.dataset.searchIndex = Number.MAX_SAFE_INTEGER;
+		} else {
+			listItem.dataset.searchIndex = searchIndex;
+		}
+		listItem.style.display = (searchIndex < 0) && !listItem.classList.contains("selected") ? 'none' : '';
 	});
 
 	// sort list items by search index and name
@@ -2881,18 +2902,25 @@ function initFilters() {
 
 function filterFocus(e) {
 	const f = gId("filters");
-	if (e.type === "focus") f.classList.remove('fade');	// immediately show (still has transition)
-	// compute sticky top (with delay for transition)
-	setTimeout(() => {
-		const sti = parseInt(getComputedStyle(d.documentElement).getPropertyValue('--sti')) + (e.type === "focus" ? 1 : -1) * f.offsetHeight;
-		sCol('--sti', sti + "px");
-	}, 252);
+	const c = !!f.querySelectorAll("input[type=checkbox]:checked").length;
+	const h = f.offsetHeight;
+	const sti = parseInt(getComputedStyle(d.documentElement).getPropertyValue('--sti'));
+	if (e.type === "focus") {
+		// compute sticky top (with delay for transition)
+		if (!h) setTimeout(() => {
+			sCol('--sti', (sti+f.offsetHeight) + "px"); // has an unpleasant consequence on palette offset
+		}, 255);
+		f.classList.remove('fade');	// immediately show (still has transition)
+	}
 	if (e.type === "blur") {
 		setTimeout(() => {
 			if (e.target === document.activeElement && document.hasFocus()) return;
 			// do not hide if filter is active
-			if (gId("filters").querySelectorAll("input[type=checkbox]:checked").length) return;
-			f.classList.add('fade');
+			if (!c) {
+				// compute sticky top
+				sCol('--sti', (sti-h) + "px"); // has an unpleasant consequence on palette offset
+				f.classList.add('fade');
+			}
 		}, 255);	// wait with hiding
 	}
 }
@@ -2902,11 +2930,11 @@ function filterFx() {
 	inputField.value = '';
 	inputField.focus();
 	clean(inputField.nextElementSibling);
-	gId("fxlist").querySelectorAll('.lstI').forEach((listItem,i) => {
+	gId("fxlist").querySelectorAll('.lstI').forEach((listItem, i) => {
 		const listItemName = listItem.querySelector('.lstIname').innerText;
 		let hide = false;
-		gId("filters").querySelectorAll("input[type=checkbox]").forEach((e) => { if (e.checked && !listItemName.includes(e.dataset.flt)) hide = true; });
-		listItem.style.display = hide ? 'none' : '';
+		gId("filters").querySelectorAll("input[type=checkbox]").forEach((e) => { if (e.checked && !listItemName.includes(e.dataset.flt)) hide = i > 0 /*true*/; });
+		listItem.style.display = hide && !listItem.classList.contains("selected") ? 'none' : '';
 	});
 }
 
@@ -3058,7 +3086,7 @@ function size()
 
 function togglePcMode(fromB = false)
 {
-	let ap = (fromB && !lastinfo) || (lastinfo && lastinfo.wifi && lastinfo.witi.ap);
+	let ap = (fromB && !lastinfo) || (lastinfo && lastinfo.wifi && lastinfo.wifi.ap);
 	if (fromB) {
 		pcModeA = !pcModeA;
 		localStorage.setItem('pcm', pcModeA);
@@ -3195,7 +3223,7 @@ function simplifyUI() {
 	createDropdown("palw", "Change palette");
 	createDropdown("fx", "Change effect", [gId("fxFind"), gId("fxlist")]);
 
-	// Hide pallete label
+	// Hide palette label
 	gId("pall").style.display = "none";
 	gId("Colors").insertBefore(document.createElement("br"), gId("pall"));
 	// Hide effect label

@@ -138,7 +138,7 @@ static bool bufferedFindObjectEnd() {
 
   if (!f || !f.size()) return false;
 
-  uint16_t objDepth = 0; //num of '{' minus num of '}'. return once 0
+  unsigned objDepth = 0; //num of '{' minus num of '}'. return once 0
   //size_t start = f.position();
   byte buf[FS_BUFSIZE];
 
@@ -176,7 +176,7 @@ static void writeSpace(size_t l)
   if (knownLargestSpace < l) knownLargestSpace = l;
 }
 
-bool appendObjectToFile(const char* key, JsonDocument* content, uint32_t s, uint32_t contentLen = 0)
+static bool appendObjectToFile(const char* key, const JsonDocument* content, uint32_t s, uint32_t contentLen = 0)
 {
   #ifdef WLED_DEBUG_FS
     DEBUGFS_PRINTLN(F("Append"));
@@ -255,14 +255,14 @@ bool appendObjectToFile(const char* key, JsonDocument* content, uint32_t s, uint
   return true;
 }
 
-bool writeObjectToFileUsingId(const char* file, uint16_t id, JsonDocument* content)
+bool writeObjectToFileUsingId(const char* file, uint16_t id, const JsonDocument* content)
 {
   char objKey[10];
   sprintf(objKey, "\"%d\":", id);
   return writeObjectToFile(file, objKey, content);
 }
 
-bool writeObjectToFile(const char* file, const char* key, JsonDocument* content)
+bool writeObjectToFile(const char* file, const char* key, const JsonDocument* content)
 {
   uint32_t s = 0; //timing
   #ifdef WLED_DEBUG_FS
@@ -433,7 +433,7 @@ bool handleFileRead(AsyncWebServerRequest* request, String path){
   }
   #endif
   if(WLED_FS.exists(path) || WLED_FS.exists(path + ".gz")) {
-    request->send(WLED_FS, path, String(), request->hasArg(F("download")));
+    request->send(request->beginResponse(WLED_FS, path, {}, request->hasArg(F("download")), {}));
     return true;
   }
   return false;

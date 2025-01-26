@@ -84,11 +84,11 @@ static void changeEffect(uint8_t fx)
     for (unsigned i = 0; i < strip.getSegmentsNum(); i++) {
       Segment& seg = strip.getSegment(i);
       if (!seg.isActive() || !seg.isSelected()) continue;
-      strip.setMode(i, fx);
+      seg.setMode(fx);
     }
     setValuesFromFirstSelectedSeg();
   } else {
-    strip.setMode(strip.getMainSegmentId(), fx);
+    strip.getSegment(strip.getMainSegmentId()).setMode(fx);
     setValuesFromMainSeg();
   }
   stateChanged = true;
@@ -129,7 +129,7 @@ static void changeEffectSpeed(int8_t amount)
   } else { // if Effect == "solid Color", change the hue of the primary color
     Segment& sseg = irApplyToAllSelected ? strip.getFirstSelectedSeg() : strip.getMainSegment();
     CRGB fastled_col = CRGB(sseg.colors[0]);
-    CHSV prim_hsv = rgb2hsv_approximate(fastled_col);
+    CHSV prim_hsv = rgb2hsv(fastled_col);
     int16_t new_val = (int16_t)prim_hsv.h + amount;
     if (new_val > 255) new_val -= 255;  // roll-over if  bigger than 255
     if (new_val < 0) new_val += 255;    // roll-over if smaller than 0
@@ -173,7 +173,7 @@ static void changeEffectIntensity(int8_t amount)
   } else { // if Effect == "solid Color", change the saturation of the primary color
     Segment& sseg = irApplyToAllSelected ? strip.getFirstSelectedSeg() : strip.getMainSegment();
     CRGB fastled_col = CRGB(sseg.colors[0]);
-    CHSV prim_hsv = rgb2hsv_approximate(fastled_col);
+    CHSV prim_hsv = rgb2hsv(fastled_col);
     int16_t new_val = (int16_t) prim_hsv.s + amount;
     prim_hsv.s = (byte)constrain(new_val,0,255);  // constrain to 0-255
     hsv2rgb_rainbow(prim_hsv, fastled_col);
@@ -435,7 +435,7 @@ static void decodeIR44(uint32_t code)
     case IR44_DIY2        : presetFallback(2, FX_MODE_BREATH,        0); break;
     case IR44_DIY3        : presetFallback(3, FX_MODE_FIRE_FLICKER,  0); break;
     case IR44_DIY4        : presetFallback(4, FX_MODE_RAINBOW,       0); break;
-    case IR44_DIY5        : presetFallback(5, FX_MODE_METEOR_SMOOTH, 0); break;
+    case IR44_DIY5        : presetFallback(5, FX_MODE_METEOR, 0);        break;
     case IR44_DIY6        : presetFallback(6, FX_MODE_RAIN,          0); break;
     case IR44_AUTO        : changeEffect(FX_MODE_STATIC);                break;
     case IR44_FLASH       : changeEffect(FX_MODE_PALETTE);               break;
@@ -593,7 +593,7 @@ static void decodeIRJson(uint32_t code)
         decBrightness();
       } else if (cmdStr.startsWith(F("!presetF"))) { //!presetFallback
         uint8_t p1 = fdo["PL"] | 1;
-        uint8_t p2 = fdo["FX"] | random8(strip.getModeCount() -1);
+        uint8_t p2 = fdo["FX"] | hw_random8(strip.getModeCount() -1);
         uint8_t p3 = fdo["FP"] | 0;
         presetFallback(p1, p2, p3);
       }
@@ -714,9 +714,8 @@ void handleIR()
     if (strip.isUpdating() && timeDiff < 240) return;  // be nice, but not too nice
     irCheckedTime = currentTime;
     if (irrecv->decode(&results)) {
-      if (results.value != 0) { // only print results if anything is received ( != 0 )
-        if (!pinManager.isPinAllocated(hardwareTX) || pinManager.getPinOwner(hardwareTX) == PinOwner::DebugOut) // Serial TX pin (GPIO 1 on ESP32 and ESP8266)
-          Serial.printf_P(PSTR("IR recv: 0x%lX\n"), (unsigned long)results.value);
+      if (results.value != 0 && serialCanTX) { // only print results if anything is received ( != 0 )
+        Serial.printf_P(PSTR("IR recv: 0x%lX\n"), (unsigned long)results.value);
       }
       decodeIR(results.value);
       irrecv->resume();
