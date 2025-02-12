@@ -17,6 +17,7 @@
 
 #include "const.h"
 #include "bus_manager.h"
+#include "effects/Effect.h"
 
 #define FASTLED_INTERNAL //remove annoying pragma messages
 #define USE_GET_MILLISECOND_TIMER
@@ -366,7 +367,6 @@ typedef struct Segment {
     uint8_t  speed;
     uint8_t  intensity;
     uint8_t  palette;
-    uint8_t  mode;
     union {
       uint16_t options; //bit pattern: msb first: [transposed mirrorY reverseY] transitional (tbd) paused needspixelstate mirrored on reverse selected
       struct {
@@ -401,7 +401,6 @@ typedef struct Segment {
     char    *name;
 
     // runtime data
-    unsigned long next_time;  // millis() of next update
     uint32_t step;  // custom "step" var
     uint32_t call;  // call counter
     uint16_t aux0;  // custom var
@@ -434,6 +433,7 @@ typedef struct Segment {
     } tmpsegd_t;
 
   private:
+    std::unique_ptr<Effect> effect;
     union {
       uint8_t  _capabilities;
       struct {
@@ -459,7 +459,6 @@ typedef struct Segment {
     static uint16_t _lastPaletteBlend;        // blend palette according to set Transition Delay in millis()%0xFFFF
     static uint16_t _transitionprogress;      // current transition progress 0 - 0xFFFF
     #ifndef WLED_DISABLE_MODE_BLEND
-    static bool          _modeBlend;          // mode/effect blending semaphore
     // clipping
     static uint16_t _clipStart, _clipStop;
     static uint8_t  _clipStartY, _clipStopY;
@@ -468,25 +467,28 @@ typedef struct Segment {
     // transition data, valid only if transitional==true, holds values during transition (72 bytes)
     struct Transition {
       #ifndef WLED_DISABLE_MODE_BLEND
+      //TODO remove?
       tmpsegd_t     _segT;        // previous segment environment
-      uint8_t       _modeT;       // previous mode/effect
+      std::unique_ptr<Effect> _effectT;       // previous mode/effect
       #else
       uint32_t      _colorT[NUM_COLORS];
       #endif
-      uint8_t       _palTid;      // previous palette
-      uint8_t       _briT;        // temporary brightness
-      uint8_t       _cctT;        // temporary CCT
-      CRGBPalette16 _palT;        // temporary palette
-      uint8_t       _prevPaletteBlends; // number of previous palette blends (there are max 255 blends possible)
-      unsigned long _start;       // must accommodate millis()
+      // uint32_t      _colorT[NUM_COLORS];
+      uint8_t       _palTid;                  // previous palette
+      uint8_t       _briT;                    // temporary brightness
+      uint8_t       _cctT;                    // temporary CCT
+      CRGBPalette16 _palT;                    // temporary palette
+      uint8_t       _prevPaletteBlends;       // number of previous palette blends (there are max 255 blends possible)
+      unsigned long _start;                   // must accommodate millis()
       uint16_t      _dur;
-      Transition(uint16_t dur=750)
+      Transition(unsigned long start, uint16_t duration)
         : _palT(CRGBPalette16(CRGB::Black))
         , _prevPaletteBlends(0)
-        , _start(millis())
-        , _dur(dur)
+        , _start(start)
+        , _dur(duration)
       {}
-    } *_t;
+    };
+    std::unique_ptr<Transition> _t;
 
     [[gnu::hot]] void _setPixelColorXY_raw(const int& x, const int& y, uint32_t& col) const; // set pixel without mapping (internal use only)
 
@@ -499,7 +501,6 @@ typedef struct Segment {
       speed(DEFAULT_SPEED),
       intensity(DEFAULT_INTENSITY),
       palette(0),
-      mode(DEFAULT_MODE),
       options(SELECTED | SEGMENT_ON),
       grouping(1),
       spacing(0),
@@ -515,7 +516,6 @@ typedef struct Segment {
       startY(0),
       stopY(1),
       name(nullptr),
-      next_time(0),
       step(0),
       call(0),
       aux0(0),
@@ -536,8 +536,8 @@ typedef struct Segment {
       stopY  = sStopY;
     }
 
-    Segment(const Segment &orig); // copy constructor
-    Segment(Segment &&orig) noexcept; // move constructor
+    Segment(const Segment &orig) = delete; // copy constructor
+    Segment(Segment &&orig) noexcept = default; // move constructor
 
     ~Segment() {
       #ifdef WLED_DEBUG
@@ -551,13 +551,14 @@ typedef struct Segment {
       deallocateData();
     }
 
-    Segment& operator= (const Segment &orig); // copy assignment
-    Segment& operator= (Segment &&orig) noexcept; // move assignment
+    Segment& operator= (const Segment &orig) = delete; // copy assignment
+    Segment& operator= (Segment &&orig) noexcept = default; // move assignment
 
 #ifdef WLED_DEBUG
     size_t getSize() const { return sizeof(Segment) + (data?_dataLen:0) + (name?strlen(name):0) + (_t?sizeof(Transition):0); }
 #endif
 
+    inline uint8_t  getEffectId()        const { return (effect != nullptr) ? effect->getEffectId() : 0u; }
     inline bool     getOption(uint8_t n) const { return ((options >> n) & 0x01); }
     inline bool     isSelected()         const { return selected; }
     inline bool     isInTransition()     const { return _t != nullptr; }
@@ -574,9 +575,6 @@ typedef struct Segment {
 
     inline static unsigned getUsedSegmentData()            { return Segment::_usedSegmentData; }
     inline static void     addUsedSegmentData(int len)     { Segment::_usedSegmentData += len; }
-    #ifndef WLED_DISABLE_MODE_BLEND
-    inline static void     modeBlend(bool blend)           { _modeBlend = blend; }
-    #endif
     inline static unsigned vLength()                       { return Segment::_vLength; }
     inline static unsigned vWidth()                        { return Segment::_vWidth; }
     inline static unsigned vHeight()                       { return Segment::_vHeight; }
@@ -591,9 +589,9 @@ typedef struct Segment {
     Segment &setCCT(uint16_t k);
     Segment &setOpacity(uint8_t o);
     Segment &setOption(uint8_t n, bool val);
-    Segment &setMode(uint8_t fx, bool loadDefaults = false);
+    Segment &setMode(uint8_t effectId, bool loadDefaults = false);
     Segment &setPalette(uint8_t pal);
-    uint8_t differs(const Segment& b) const;
+    //uint8_t differs(const Segment& b) const;
     void    refreshLightCapabilities();
 
     // runtime data functions
@@ -610,18 +608,21 @@ typedef struct Segment {
     inline Segment &markForReset() { reset = true; return *this; }  // setOption(SEG_OPTION_RESET, true)
 
     // transition functions
-    void     startTransition(uint16_t dur);     // transition has to start before actual segment values change
+    void     startTransition(uint16_t dur, std::unique_ptr<Effect>&& oldEffect = nullptr); // transition has to start before actual segment values change
     void     stopTransition();                  // ends transition mode by destroying transition structure (does nothing if not in transition)
     inline void handleTransition() { updateTransitionProgress(); if (progress() == 0xFFFFU) stopTransition(); }
+/*
     #ifndef WLED_DISABLE_MODE_BLEND
     void     swapSegenv(tmpsegd_t &tmpSegD);    // copies segment data into specifed buffer, if buffer is not a transition buffer, segment data is overwritten from transition buffer
     void     restoreSegenv(const tmpsegd_t &tmpSegD); // restores segment data from buffer, if buffer is not transition buffer, changed values are copied to transition buffer
     #endif
-    [[gnu::hot]] void updateTransitionProgress();            // set current progression of transition
+*/
+    [[gnu::hot]] void updateTransitionProgress();                // set current progression of transition
     inline uint16_t progress() const { return Segment::_transitionprogress; }  // transition progression between 0-65535
     [[gnu::hot]] uint8_t  currentBri(bool useCct = false) const; // current segment brightness/CCT (blended while in transition)
-    uint8_t  currentMode() const;                            // currently active effect/mode (while in transition)
-    [[gnu::hot]] uint32_t currentColor(uint8_t slot) const;  // currently active segment color (blended while in transition)
+    Effect* getTransitionEffect() const;                         // while in transition: Old mode, nullptr otherwise
+    Effect* getCurrentEffect() const;                            // Currently active effect/mode. While in transition: New mode.
+    [[gnu::hot]] uint32_t currentColor(uint8_t slot) const;      // currently active segment color (blended while in transition)
     CRGBPalette16 &loadPalette(CRGBPalette16 &tgt, uint8_t pal);
 
     // 1D strip
@@ -784,10 +785,8 @@ class WS2812FX {  // 96 bytes
       _targetFps(WLED_FPS),
       _frametime(FRAMETIME_FIXED),
       _cumulativeFps(50 << FPS_CALC_SHIFT),
-      _isServicing(false),
       _isOffRefreshRequired(false),
       _hasWhiteChannel(false),
-      _triggered(false),
       _callback(nullptr),
       customMappingTable(nullptr),
       customMappingSize(0),
@@ -797,15 +796,13 @@ class WS2812FX {  // 96 bytes
       _mainSegment(0)
     {
       WS2812FX::instance = this;
-      _mode.reserve(MODE_COUNT);     // allocate memory to prevent initial fragmentation (does not increase size())
-      _modeData.reserve(MODE_COUNT); // allocate memory to prevent initial fragmentation (does not increase size())
-      setupEffectData(std::max(size_t{1}, std::min(_mode.capacity(), _modeData.capacity())));
+      _effectFactories.reserve(MODE_COUNT); // allocate memory to prevent initial fragmentation (does not increase size())
+      setupEffectData(std::max(size_t{1}, _effectFactories.capacity()));
     }
 
     ~WS2812FX() {
       if (customMappingTable) free(customMappingTable);
-      _mode.clear();
-      _modeData.clear();
+      _effectFactories.clear();
       _segments.clear();
 #ifndef WLED_DISABLE_2D
       panel.clear();
@@ -831,6 +828,7 @@ class WS2812FX {  // 96 bytes
       fixInvalidSegments(),                       // fixes incorrect segment configuration
       setPixelColor(unsigned i, uint32_t c) const,      // paints absolute strip pixel with index n and color c
       show(),                                     // initiates LED output
+      show(unsigned long showNow),                // initiates LED output
       setTargetFps(unsigned fps),
       setupEffectData(size_t mode_count);         // add default effects to the list; defined in FX.cpp
 
@@ -840,10 +838,10 @@ class WS2812FX {  // 96 bytes
     inline void setPixelColor(unsigned n, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0) const { setPixelColor(n, RGBW32(r,g,b,w)); }
     inline void setPixelColor(unsigned n, CRGB c) const                                         { setPixelColor(n, c.red, c.green, c.blue); }
     inline void fill(uint32_t c) const    { for (unsigned i = 0; i < getLengthTotal(); i++) setPixelColor(i, c); } // fill whole strip with color (inline)
-    inline void trigger()                                     { _triggered = true; }  // Forces the next frame to be computed on all active segments.
+    inline void trigger()                                     { _lastShow = 0u; }  // Forces the next frame to be computed on all active segments.
     inline void setShowCallback(show_callback cb)             { _callback = cb; }
     inline void setTransition(uint16_t t)                     { _transitionDur = t; } // sets transition time (in ms)
-    inline void appendSegment(const Segment &seg = Segment()) { if (_segments.size() < getMaxSegments()) _segments.push_back(seg); }
+    inline void appendSegment(Segment &&seg = Segment())      { if (_segments.size() < getMaxSegments()) _segments.push_back(std::move(seg)); }
     inline void suspend()                                     { _suspend = true; }    // will suspend (and canacel) strip.service() execution
     inline void resume()                                      { _suspend = false; }   // will resume strip.service() execution
 
@@ -854,11 +852,10 @@ class WS2812FX {  // 96 bytes
       deserializeMap(unsigned n = 0);
 
     inline bool isUpdating() const           { return !BusManager::canAllShow(); } // return true if the strip is being sent pixel updates
-    inline bool isServicing() const          { return _isServicing; }           // returns true if strip.service() is executing
     inline bool hasWhiteChannel() const      { return _hasWhiteChannel; }       // returns true if strip contains separate white chanel
     inline bool isOffRefreshRequired() const { return _isOffRefreshRequired; }  // returns true if strip requires regular updates (i.e. TM1814 chipset)
     inline bool isSuspended() const          { return _suspend; }               // returns true if strip.service() execution is suspended
-    inline bool needsUpdate() const          { return _triggered; }             // returns true if strip received a trigger() request
+    // inline bool needsUpdate() const          { return _triggered; }             // returns true if strip received a trigger() request
 
     uint8_t
       paletteBlend,
@@ -866,7 +863,7 @@ class WS2812FX {  // 96 bytes
       getFirstSelectedSegId() const,
       getLastActiveSegmentId() const,
       getActiveSegsLightCapabilities(bool selectedOnly = false) const,
-      addEffect(uint8_t id, mode_ptr mode_fn, const char *mode_name);         // add effect to the list; defined in FX.cpp;
+      addEffect(std::unique_ptr<EffectFactory>&& factory);                    // add effect to the list; defined in FX.cpp;
 
     inline uint8_t getBrightness() const    { return _brightness; }       // returns current strip brightness
     inline static constexpr unsigned getMaxSegments() { return MAX_NUM_SEGMENTS; }  // returns maximum number of supported segments (fixed value)
@@ -875,7 +872,7 @@ class WS2812FX {  // 96 bytes
     inline uint8_t getMainSegmentId() const { return _mainSegment; }      // returns main segment index
     inline uint8_t getPaletteCount() const  { return 13 + GRADIENT_PALETTE_COUNT + customPalettes.size(); }
     inline uint8_t getTargetFps() const     { return _targetFps; }        // returns rough FPS value for las 2s interval
-    inline size_t  getModeCount() const     { return _mode.size(); }      // returns number of registered modes/effects
+    inline size_t  getModeCount() const     { return _effectFactories.size(); }  // returns number of registered modes/effects
 
     uint16_t
       getLengthPhysical() const,
@@ -896,8 +893,10 @@ class WS2812FX {  // 96 bytes
 
     inline uint32_t getLastShow() const   { return _lastShow; }           // returns millis() timestamp of last strip.show() call
 
-    const char *getModeData(unsigned id = 0) const { return (id && id < getModeCount()) ? _modeData[id] : PSTR("Solid"); }
-    inline const char **getModeDataSrc()  { return &(_modeData[0]); } // vectors use arrays for underlying data
+    inline EffectFactory* getEffectFactory(uint8_t effectId) const { return _effectFactories[effectId].get(); }
+    inline EffectFactory* safeGetEffectFactory(uint8_t effectId) const { return (effectId < getModeCount()) ? _effectFactories[effectId].get() : nullptr; }
+    const char *getModeData(unsigned id = 0) const { const EffectFactory* const factory = safeGetEffectFactory(id); return (factory != nullptr) ? factory->getMetaData() : PSTR("Solid"); }
+    // inline const char **getModeDataSrc()  { return &(_modeData[0]); } // vectors use arrays for underlying data
 
     Segment&        getSegment(unsigned id);
     inline Segment& getFirstSelectedSeg() { return _segments[getFirstSelectedSegId()]; }  // returns reference to first segment that is "selected"
@@ -974,20 +973,18 @@ class WS2812FX {  // 96 bytes
 
     // will require only 1 byte
     struct {
-      bool _isServicing          : 1;
       bool _isOffRefreshRequired : 1; //periodic refresh is required for the strip to remain off.
       bool _hasWhiteChannel      : 1;
-      bool _triggered            : 1;
     };
 
-    std::vector<mode_ptr>    _mode;     // SRAM footprint: 4 bytes per element
-    std::vector<const char*> _modeData; // mode (effect) name and its slider control data array
+    std::vector<std::unique_ptr<EffectFactory>> _effectFactories;
 
     show_callback _callback;
 
     uint16_t* customMappingTable;
     uint16_t  customMappingSize;
 
+    // unsigned long _previousServiceTime = 0u;
     unsigned long _lastShow;
     unsigned long _lastServiceShow;
 
