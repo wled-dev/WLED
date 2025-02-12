@@ -593,7 +593,7 @@ Segment &Segment::setMode(uint8_t effectId, bool loadDefaults) {
     effectId = 0; // set solid mode
     effectFactory = strip.getEffectFactory(0);
   }
-  if ((effect != nullptr) && (effectId == effect->getEffectId())) *this;
+  if ((effect != nullptr) && (effectId == effect->getEffectId())) return *this;
 #ifndef WLED_DISABLE_MODE_BLEND
   //DEBUG_PRINTF_P(PSTR("- Starting effect transition: %d\n"), effectId);
   startTransition(strip.getTransition(), std::move(effect)); // set effect transitions
