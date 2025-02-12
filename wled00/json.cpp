@@ -34,7 +34,12 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
   //DEBUG_PRINTLN(F("-- JSON deserialize segment."));
   Segment& seg = strip.getSegment(id);
   //DEBUG_PRINTF_P(PSTR("--  Original segment: %p (%p)\n"), &seg, seg.data);
-  const Segment prev = seg; //make a backup so we can tell if something changed (calling copy constructor)
+  // Segment prev = seg; //make a backup so we can tell if something changed (calling copy constructor)
+  //make a backup so we can tell if something changed (calling copy constructor)
+  // TODO a memory copy and comparison should be good enough... right?
+  // TODO do we really need stateChanged?
+  std::array<std::byte, sizeof(Segment)> prev;
+  std::memcpy((void*)prev.data(), (void*)&seg, prev.size());
   //DEBUG_PRINTF_P(PSTR("--  Duplicate segment: %p (%p)\n"), &prev, prev.data);
 
   int start = elem["start"] | seg.start;
@@ -179,7 +184,6 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
         if (!colValid) continue;
 
         seg.setColor(i, RGBW32(rgbw[0],rgbw[1],rgbw[2],rgbw[3]));
-        if (seg.mode == FX_MODE_STATIC) strip.trigger(); //instant refresh
       }
     } else {
       // non RGB & non White segment (usually On/Off bus)
@@ -216,10 +220,10 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
   if (seg.is2D() && seg.map1D2D == M12_pArc && (reverse != seg.reverse || reverse_y != seg.reverse_y || mirror != seg.mirror || mirror_y != seg.mirror_y)) seg.fill(BLACK); // clear entire segment (in case of Arc 1D to 2D expansion)
   #endif
 
-  byte fx = seg.mode;
+  byte fx = seg.getEffectId();
   if (getVal(elem["fx"], &fx, 0, strip.getModeCount())) {
     if (!presetId && currentPlaylist>=0) unloadPlaylist();
-    if (fx != seg.mode) seg.setMode(fx, elem[F("fxdef")]);
+    seg.setMode(fx, elem[F("fxdef")]);
   }
 
   getVal(elem["sx"], &seg.speed);
@@ -293,7 +297,11 @@ bool deserializeSegment(JsonObject elem, byte it, byte presetId)
     strip.trigger(); // force segment update
   }
   // send UDP/WS if segment options changed (except selection; will also deselect current preset)
-  if (seg.differs(prev) & 0x7F) stateChanged = true;
+  // if (seg.differs(prev) & 0x7F) stateChanged = true;
+  // NOT safe. The Segment in prev doesn't actually exist, we just want to modify some data in the correct position, that memcmp ignores it.
+  reinterpret_cast<Segment *>(prev.data())->selected = seg.selected;
+  reinterpret_cast<Segment *>(prev.data())->reset = seg.reset;
+  if (std::memcmp((void*)prev.data(), (void*)&seg, prev.size()) != 0) stateChanged = true;
 
   return true;
 }
@@ -543,7 +551,7 @@ void serializeSegment(const JsonObject& root, const Segment& seg, byte id, bool 
   strcat(colstr, "]");
   root["col"] = serialized(colstr);
 
-  root["fx"]  = seg.mode;
+  root["fx"]  = seg.getEffectId();
   root["sx"]  = seg.speed;
   root["ix"]  = seg.intensity;
   root["pal"] = seg.palette;

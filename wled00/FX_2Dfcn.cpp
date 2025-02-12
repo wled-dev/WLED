@@ -152,7 +152,7 @@ void IRAM_ATTR_YN Segment::_setPixelColorXY_raw(const int& x, const int& y, uint
   const int baseY = startY + y;
 #ifndef WLED_DISABLE_MODE_BLEND
   // if blending modes, blend with underlying pixel
-  if (_modeBlend && blendingStyle == BLEND_STYLE_FADE) col = color_blend16(strip.getPixelColorXY(baseX, baseY), col, 0xFFFFU - progress());
+  if (isInTransition() && blendingStyle == BLEND_STYLE_FADE) col = color_blend16(strip.getPixelColorXY(baseX, baseY), col, 0xFFFFU - progress());
 #endif
   strip.setPixelColorXY(baseX, baseY, col);
 
@@ -166,10 +166,10 @@ void IRAM_ATTR_YN Segment::_setPixelColorXY_raw(const int& x, const int& y, uint
   }
 }
 
-// pixel is clipped if it falls outside clipping range (_modeBlend==true) or is inside clipping range (_modeBlend==false)
+// pixel is clipped if it falls outside clipping range (isInTransition()==true) or is inside clipping range (isInTransition()==false)
 // if clipping start > stop the clipping range is inverted
-// _modeBlend==true  -> old effect during transition
-// _modeBlend==false -> new effect during transition
+// isInTransition()==true  -> old effect during transition
+// isInTransition()==false -> new effect during transition
 bool IRAM_ATTR_YN Segment::isPixelXYClipped(int x, int y) const {
 #ifndef WLED_DISABLE_MODE_BLEND
   if (_clipStart != _clipStop && blendingStyle != BLEND_STYLE_FADE) {
@@ -189,7 +189,7 @@ bool IRAM_ATTR_YN Segment::isPixelXYClipped(int x, int y) const {
     }
     bool xInside = (x >= startX && x < stopX); if (invertX) xInside = !xInside;
     bool yInside = (y >= startY && y < stopY); if (invertY) yInside = !yInside;
-    const bool clip = (invertX && invertY) ? !_modeBlend : _modeBlend;
+    const bool clip = (invertX && invertY) ? !isInTransition() : isInTransition();
     if (xInside && yInside) return clip; // covers window & corners (inverted)
     return !clip;
   }
@@ -204,9 +204,10 @@ void IRAM_ATTR_YN Segment::setPixelColorXY(int x, int y, uint32_t col) const
   const int vW = vWidth();   // segment width in logical pixels (can be 0 if segment is inactive)
   const int vH = vHeight();  // segment height in logical pixels (is always >= 1)
 
+//TODO
 #ifndef WLED_DISABLE_MODE_BLEND
   unsigned prog = 0xFFFF - progress();
-  if (!prog && !_modeBlend && (blendingStyle & BLEND_STYLE_PUSH_MASK)) {
+  if (!prog && !isInTransition() && (blendingStyle & BLEND_STYLE_PUSH_MASK)) {
     unsigned dX = (blendingStyle == BLEND_STYLE_PUSH_UP   || blendingStyle == BLEND_STYLE_PUSH_DOWN)  ? 0 : prog * vW / 0xFFFF;
     unsigned dY = (blendingStyle == BLEND_STYLE_PUSH_LEFT || blendingStyle == BLEND_STYLE_PUSH_RIGHT) ? 0 : prog * vH / 0xFFFF;
     if (blendingStyle == BLEND_STYLE_PUSH_LEFT || blendingStyle == BLEND_STYLE_PUSH_TL || blendingStyle == BLEND_STYLE_PUSH_BL) x += dX;
@@ -295,7 +296,7 @@ uint32_t IRAM_ATTR_YN Segment::getPixelColorXY(int x, int y) const {
 
 #ifndef WLED_DISABLE_MODE_BLEND
   unsigned prog = 0xFFFF - progress();
-  if (!prog && !_modeBlend && (blendingStyle & BLEND_STYLE_PUSH_MASK)) {
+  if (!prog && !isInTransition() && (blendingStyle & BLEND_STYLE_PUSH_MASK)) {
     unsigned dX = (blendingStyle == BLEND_STYLE_PUSH_UP   || blendingStyle == BLEND_STYLE_PUSH_DOWN)  ? 0 : prog * vW / 0xFFFF;
     unsigned dY = (blendingStyle == BLEND_STYLE_PUSH_LEFT || blendingStyle == BLEND_STYLE_PUSH_RIGHT) ? 0 : prog * vH / 0xFFFF;
     if (blendingStyle == BLEND_STYLE_PUSH_LEFT || blendingStyle == BLEND_STYLE_PUSH_TL || blendingStyle == BLEND_STYLE_PUSH_BL) x -= dX;

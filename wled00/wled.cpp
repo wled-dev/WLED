@@ -120,7 +120,10 @@ void WLED::loop()
     handlePresets();
     yield();
 
-    if (!offMode || strip.isOffRefreshRequired() || strip.needsUpdate())
+    // TODO why did we service a strip that was triggered but off?
+    // TODO offMode appears to be set only from hardware buttons. How is the UI off button handled?
+    // if (!offMode || strip.isOffRefreshRequired() || strip.needsUpdate())
+    if (!offMode || strip.isOffRefreshRequired())
       strip.service();
     #ifdef ESP8266
     else if (!noWifiSleep)

@@ -366,6 +366,7 @@ void handleIO()
 {
   handleButton();
 
+/*
   // if we want to control on-board LED (ESP8266) or relay we have to do it here as the final show() may not happen until
   // next loop() cycle
   if (strip.getBrightness()) {
@@ -390,6 +391,7 @@ void handleIO()
       offMode = true;
     }
   }
+*/
 }
 
 void IRAM_ATTR touchButtonISR()

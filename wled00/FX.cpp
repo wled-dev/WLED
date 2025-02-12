@@ -13,6 +13,11 @@
 #include "wled.h"
 #include "FX.h"
 #include "fcn_declare.h"
+#include "effects/StaticEffect.h"
+#include "effects/PaletteEffect.h"
+#include <memory>
+
+#include <cassert>
 
 
  //////////////
@@ -855,11 +860,10 @@ static const char _data_FX_MODE_ANDROID[] PROGMEM = "Android@!,Width;!,!;!;;m12=
  * color1 = background color
  * color2 and color3 = colors of two adjacent leds
  */
-static uint16_t chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do_palette) {
+static uint16_t chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do_palette, bool chase_random) {
   uint16_t counter = strip.now * ((SEGMENT.speed >> 2) + 1);
   uint16_t a = (counter * SEGLEN) >> 16;
 
-  bool chase_random = (SEGMENT.mode == FX_MODE_CHASE_RANDOM);
   if (chase_random) {
     if (a < SEGENV.step) //we hit the start again, choose new color for Chase random
     {
@@ -926,7 +930,7 @@ static uint16_t chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do
  * Bicolor chase, more primary color.
  */
 uint16_t mode_chase_color(void) {
-  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), true);
+  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), true, false);
 }
 static const char _data_FX_MODE_CHASE_COLOR[] PROGMEM = "Chase@!,Width;!,!,!;!";
 
@@ -935,7 +939,7 @@ static const char _data_FX_MODE_CHASE_COLOR[] PROGMEM = "Chase@!,Width;!,!,!;!";
  * Primary running followed by random color.
  */
 uint16_t mode_chase_random(void) {
-  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), false);
+  return chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), false, true);
 }
 static const char _data_FX_MODE_CHASE_RANDOM[] PROGMEM = "Chase Random@!,Width;!,,!;!";
 
@@ -949,7 +953,7 @@ uint16_t mode_chase_rainbow(void) {
   unsigned color_index = SEGENV.call & 0xFF;
   uint32_t color = SEGMENT.color_wheel(((SEGENV.step * color_sep) + color_index) & 0xFF);
 
-  return chase(color, SEGCOLOR(0), SEGCOLOR(1), false);
+  return chase(color, SEGCOLOR(0), SEGCOLOR(1), false, false);
 }
 static const char _data_FX_MODE_CHASE_RAINBOW[] PROGMEM = "Chase Rainbow@!,Width;!,!;!";
 
@@ -963,7 +967,7 @@ uint16_t mode_chase_rainbow_white(void) {
   uint32_t color2 = SEGMENT.color_wheel(((n * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
   uint32_t color3 = SEGMENT.color_wheel(((m * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
 
-  return chase(SEGCOLOR(0), color2, color3, false);
+  return chase(SEGCOLOR(0), color2, color3, false, false);
 }
 static const char _data_FX_MODE_CHASE_RAINBOW_WHITE[] PROGMEM = "Rainbow Runner@!,Size;Bg;!";
 
@@ -7674,36 +7678,41 @@ static const char _data_RESERVED[] PROGMEM = "RSVD";
 // use id==255 to find unallocated gaps (with "Reserved" data string)
 // if vector size() is smaller than id (single) data is appended at the end (regardless of id)
 // return the actual id used for the effect or 255 if the add failed.
-uint8_t WS2812FX::addEffect(uint8_t id, mode_ptr mode_fn, const char *mode_name) {
-  if (id == 255) { // find empty slot
-    for (size_t i=1; i<_mode.size(); i++) if (_modeData[i] == _data_RESERVED) { id = i; break; }
+uint8_t WS2812FX::addEffect(std::unique_ptr<EffectFactory>&& factory) {
+  uint8_t id = factory->getEffectId();
+  if (id == 255u) { // find empty slot
+    for (size_t i=1; i<_effectFactories.size(); i++) if (_effectFactories[i] == nullptr) { id = i; break; }
   }
-  if (id < _mode.size()) {
-    if (_modeData[id] != _data_RESERVED) return 255; // do not overwrite an already added effect
-    _mode[id]     = mode_fn;
-    _modeData[id] = mode_name;
+  for (size_t i = _effectFactories.size(); i < id; ++i) {
+    _effectFactories.push_back(nullptr);
+  }
+  if (id < _effectFactories.size()) {
+    if (_effectFactories[id] != nullptr) return 255; // do not overwrite an already added effect
+    _effectFactories[id] = std::move(factory);
     return id;
-  } else if(_mode.size() < 255) { // 255 is reserved for indicating the effect wasn't added
-    _mode.push_back(mode_fn);
-    _modeData.push_back(mode_name);
-    if (_modeCount < _mode.size()) _modeCount++;
-    return _mode.size() - 1;
+  } else if(_effectFactories.size() < 255) { // 255 is reserved for indicating the effect wasn't added
+    _effectFactories.push_back(std::move(factory));
+    // if (_modeCount < _effectFactories.size()) _modeCount++;
+    return _effectFactories.size() - 1;
   } else {
-    return 255; // The vector is full so return 255
+    return 255u; // The vector is full so return 255
   }
 }
 
-void WS2812FX::setupEffectData() {
+void WS2812FX::setupEffectData(size_t modeCount) {
   // Solid must be first! (assuming vector is empty upon call to setup)
-  _mode.push_back(&mode_static);
-  _modeData.push_back(_data_FX_MODE_STATIC);
+  // _effectFactories.push_back(std::make_unique<StaticEffectFactory>());
+  // _effectFactories.push_back(std::make_unique<EffectFactory>(StaticEffect::effectInformation));
+  // _effectFactories.push_back(std::make_unique<EffectFactory>(PaletteEffect::effectInformation));
+  addEffect(std::make_unique<EffectFactory>(StaticEffect::effectInformation));
+  addEffect(std::make_unique<EffectFactory>(PaletteEffect::effectInformation));
   // fill reserved word in case there will be any gaps in the array
-  for (size_t i=1; i<_modeCount; i++) {
-    _mode.push_back(&mode_static);
-    _modeData.push_back(_data_RESERVED);
+  for (size_t i=1; i<modeCount; i++) {
+    _effectFactories.push_back(nullptr);
   }
   // now replace all pre-allocated effects
   // --- 1D non-audio effects ---
+/*
   addEffect(FX_MODE_BLINK, &mode_blink, _data_FX_MODE_BLINK);
   addEffect(FX_MODE_BREATH, &mode_breath, _data_FX_MODE_BREATH);
   addEffect(FX_MODE_COLOR_WIPE, &mode_color_wipe, _data_FX_MODE_COLOR_WIPE);
@@ -7911,5 +7920,5 @@ void WS2812FX::setupEffectData() {
 
   addEffect(FX_MODE_2DAKEMI, &mode_2DAkemi, _data_FX_MODE_2DAKEMI); // audio
 #endif // WLED_DISABLE_2D
-
+*/
 }
